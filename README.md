@@ -10,7 +10,7 @@ UE-0002 ──┼── virtual cell ── virtual core
 UE-0003 ──┘
 ```
 
-## v0.3 client + audio
+## v0.4 wideband virtual cell\n\nThe simulator now includes a large-bandwidth virtual cellular radio model. The default cell is **100 MHz wide** with an approximately 277-resource-block model and a nominal 450 Mbps aggregate throughput model. Connected UEs share the virtual spectrum through a simple scheduler.\n\nThis is deliberately a software resource model: it does not create or transmit 100 MHz of RF or consume 100 MHz of sampled radio bandwidth. Audio and data still travel over the simulator TCP connection.\n\nClients can query their current cell bandwidth, modeled throughput, resource blocks, and per-UE allocation.\n\n## v0.3 client + audio
 
 The project now includes a standalone client app:
 
