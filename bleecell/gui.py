@@ -36,7 +36,7 @@ class App:
         audio=ttk.LabelFrame(main,text="audio output"); audio.pack(fill="x",pady=5)
         self.audio_box=ttk.Combobox(audio,state="readonly",width=65); self.audio_box.grid(row=0,column=0,padx=8,pady=8,sticky="ew")
         ttk.Button(audio,text="refresh",command=self.refresh_audio).grid(row=0,column=1,padx=4); ttk.Button(audio,text="start audio",command=self.start_audio).grid(row=0,column=2,padx=4); ttk.Button(audio,text="stop audio",command=self.stop_audio).grid(row=0,column=3,padx=4); ttk.Button(audio,text="test event",command=self.test_tone).grid(row=0,column=4,padx=4)
-        self.audio_status=ttk.Label(audio,text="audio stopped"); self.audio_status.grid(row=1,column=0,columnspan=5,padx=8,pady=(0,8),sticky="w"); audio.columnconfigure(0,weight=1)
+        self.audio_status=ttk.Label(audio,text="audio stopped"); self.audio_status.grid(row=1,column=0,columnspan=5,padx=8,pady=(0,8),sticky="w"); self.radio_status=ttk.Label(audio,text="wideband cell: 100 MHz | 450 Mbps model | 277 RBs"); self.radio_status.grid(row=2,column=0,columnspan=5,padx=8,pady=(0,8),sticky="w"); audio.columnconfigure(0,weight=1)
         log_frame=ttk.LabelFrame(main,text="log"); log_frame.pack(fill="both",expand=True,pady=5); self.log=tk.Text(log_frame,height=12,state="disabled"); self.log.pack(fill="both",expand=True); self.refresh_audio()
     def write(self,text):
         self.log.configure(state="normal"); self.log.insert("end",text+"\n"); self.log.see("end"); self.log.configure(state="disabled")
@@ -55,8 +55,8 @@ class App:
         if self.network:return
         async def start():
             try:
-                self.network=BleeCellNetwork(); self.network.core.add_subscriber("UE-0001","key-one"); self.network.core.add_subscriber("UE-0002","key-two"); self.core_server,self.cell_server=await self.network.start()
-                self.root.after(0,lambda:self.net_status.config(text="running")); self.root.after(0,lambda:self.write("core :9000 / cell :9100 started")); self.audio_event(330)
+                self.network=BleeCellNetwork(); self.network.core.cell.bandwidth_hz=100_000_000; self.network.core.add_subscriber("UE-0001","key-one"); self.network.core.add_subscriber("UE-0002","key-two"); self.core_server,self.cell_server=await self.network.start()
+                self.root.after(0,lambda:self.net_status.config(text="running")); self.root.after(0,lambda:self.write("core :9000 / cell :9100 started")); self.root.after(0,lambda:self.radio_status.config(text="wideband cell: 100 MHz | 450 Mbps model")); self.audio_event(330)
             except Exception as exc:self.root.after(0,lambda:messagebox.showerror("bleeCELL",str(exc)))
         self.submit(start())
     def stop_network(self):
