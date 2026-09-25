@@ -14,26 +14,22 @@ class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("bleeCELL")
-        self.root.geometry("760x520")
-
+        self.root.geometry("800x600")
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
-
         self.network: BleeCellNetwork | None = None
         self.core_server = None
         self.cell_server = None
         self.devices: dict[str, Device] = {}
         self.audio: AudioOutput | None = None
         self.audio_devices: list[tuple[int, str]] = []
-
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build(self) -> None:
         main = ttk.Frame(self.root, padding=12)
         main.pack(fill="both", expand=True)
-
         ttk.Label(main, text="bleeCELL", font=("TkDefaultFont", 20, "bold")).pack(anchor="w")
         ttk.Label(main, text="software-only cellular network simulator").pack(anchor="w", pady=(0, 12))
 
@@ -46,13 +42,11 @@ class App:
 
         devices = ttk.LabelFrame(main, text="virtual devices")
         devices.pack(fill="x", pady=5)
-
         ttk.Label(devices, text="device").grid(row=0, column=0, padx=8, pady=8)
         self.device_box = ttk.Combobox(devices, values=["UE-0001", "UE-0002"], state="readonly")
         self.device_box.current(0)
         self.device_box.grid(row=0, column=1, padx=8)
         ttk.Button(devices, text="connect/register", command=self.connect_device).grid(row=0, column=2, padx=8)
-
         ttk.Label(devices, text="recipient").grid(row=1, column=0, padx=8, pady=8)
         self.recipient_box = ttk.Combobox(devices, values=["UE-0001", "UE-0002"], state="readonly")
         self.recipient_box.current(1)
@@ -67,14 +61,17 @@ class App:
         self.audio_box = ttk.Combobox(audio, state="readonly", width=65)
         self.audio_box.grid(row=0, column=0, padx=8, pady=8, sticky="ew")
         ttk.Button(audio, text="refresh", command=self.refresh_audio).grid(row=0, column=1, padx=4)
-        ttk.Button(audio, text="test tone", command=self.test_tone).grid(row=0, column=2, padx=4)
+        ttk.Button(audio, text="start audio", command=self.start_audio).grid(row=0, column=2, padx=4)
+        ttk.Button(audio, text="stop audio", command=self.stop_audio).grid(row=0, column=3, padx=4)
+        ttk.Button(audio, text="test event", command=self.test_tone).grid(row=0, column=4, padx=4)
+        self.audio_status = ttk.Label(audio, text="audio stopped")
+        self.audio_status.grid(row=1, column=0, columnspan=5, padx=8, pady=(0, 8), sticky="w")
         audio.columnconfigure(0, weight=1)
 
         log_frame = ttk.LabelFrame(main, text="log")
         log_frame.pack(fill="both", expand=True, pady=5)
         self.log = tk.Text(log_frame, height=12, state="disabled")
         self.log.pack(fill="both", expand=True)
-
         self.refresh_audio()
 
     def write(self, text: str) -> None:
@@ -89,7 +86,6 @@ class App:
     def start_network(self) -> None:
         if self.network:
             return
-
         async def start() -> None:
             try:
                 self.network = BleeCellNetwork()
@@ -98,34 +94,29 @@ class App:
                 self.core_server, self.cell_server = await self.network.start()
                 self.root.after(0, lambda: self.net_status.config(text="running"))
                 self.root.after(0, lambda: self.write("core :9000 / cell :9100 started"))
+                self.audio_event(330.0)
             except Exception as exc:
                 self.root.after(0, lambda: messagebox.showerror("bleeCELL", str(exc)))
-
         self.submit(start())
 
     def stop_network(self) -> None:
         if not self.network:
             return
-
-        def stop() -> None:
-            async def close() -> None:
-                if self.core_server:
-                    self.core_server.close()
-                    await self.core_server.wait_closed()
-                if self.cell_server:
-                    self.cell_server.close()
-                    await self.cell_server.wait_closed()
-                self.network = None
-                self.root.after(0, lambda: self.net_status.config(text="stopped"))
-
-            self.submit(close())
-
-        stop()
+        async def close() -> None:
+            if self.core_server:
+                self.core_server.close()
+                await self.core_server.wait_closed()
+            if self.cell_server:
+                self.cell_server.close()
+                await self.cell_server.wait_closed()
+            self.network = None
+            self.root.after(0, lambda: self.net_status.config(text="stopped"))
+        self.submit(close())
+        self.audio_event(180.0)
 
     def connect_device(self) -> None:
         ue_id = self.device_box.get()
         key = {"UE-0001": "key-one", "UE-0002": "key-two"}[ue_id]
-
         async def connect() -> None:
             try:
                 device = Device(ue_id, key)
@@ -134,10 +125,10 @@ class App:
                 await device.authenticate()
                 self.devices[ue_id] = device
                 self.root.after(0, lambda: self.write(f"{ue_id}: registered and authenticated"))
+                self.audio_event(660.0)
                 asyncio.create_task(self.receive_loop(device))
             except Exception as exc:
                 self.root.after(0, lambda: messagebox.showerror("device", str(exc)))
-
         if not self.network:
             self.write("start the network first")
             return
@@ -151,6 +142,8 @@ class App:
                     return
                 text = packet.payload.get("text", "") if packet.payload else ""
                 self.root.after(0, lambda t=f"{packet.sender} -> {packet.recipient}: {text}": self.write(t))
+                if packet.kind == "DATA":
+                    self.audio_event(880.0, 0.18, 0.12)
             except (ConnectionError, asyncio.IncompleteReadError):
                 return
 
@@ -166,6 +159,7 @@ class App:
             return
         self.submit(device.message(recipient, text))
         self.write(f"{sender} -> {recipient}: {text}")
+        self.audio_event(880.0, 0.18, 0.12)
         self.message_box.delete(0, "end")
 
     def refresh_audio(self) -> None:
@@ -182,18 +176,51 @@ class App:
             self.audio_box.current(0)
             self.write(str(exc))
 
+    def selected_audio(self) -> int | None:
+        if not self.audio_devices or self.audio_box.current() < 0:
+            return None
+        return self.audio_devices[self.audio_box.current()][0]
+
+    def start_audio(self) -> None:
+        if not self.audio:
+            self.write("audio unavailable")
+            return
+        device = self.selected_audio()
+        if device is None:
+            self.write("no audio output selected")
+            return
+        try:
+            self.audio.start(device)
+            self.audio_status.config(text=f"audio running -> output {device}")
+            self.write(f"continuous audio -> output {device}")
+        except Exception as exc:
+            messagebox.showerror("audio", str(exc))
+
+    def stop_audio(self) -> None:
+        if self.audio:
+            self.audio.stop()
+        self.audio_status.config(text="audio stopped")
+        self.write("continuous audio stopped")
+
+    def audio_event(self, frequency: float, seconds: float = 0.12, level: float = 0.10) -> None:
+        if self.audio and self.audio.is_running():
+            self.audio.event(frequency, seconds, level)
+
     def test_tone(self) -> None:
-        if not self.audio or not self.audio_devices:
+        device = self.selected_audio()
+        if device is None or not self.audio:
             self.write("no audio output available")
             return
-        selected = self.audio_devices[self.audio_box.current()][0]
         try:
-            self.audio.play_tone(selected)
-            self.write(f"test tone -> output {selected}")
+            if not self.audio.is_running():
+                self.audio.start(device)
+            self.audio.event(440.0, 0.5, 0.15)
+            self.write(f"test event -> output {device}")
         except Exception as exc:
             messagebox.showerror("audio", str(exc))
 
     def close(self) -> None:
+        self.stop_audio()
         self.stop_network()
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.root.destroy()
