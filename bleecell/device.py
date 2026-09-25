@@ -14,6 +14,7 @@ class Device:
         self.port = port
         self.reader: asyncio.StreamReader | None = None
         self.writer: asyncio.StreamWriter | None = None
+        self.radio: dict = {}
 
     async def connect(self) -> None:
         self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
@@ -25,11 +26,18 @@ class Device:
 
     async def register(self) -> None:
         await self.send(Packet("REGISTER", self.ue_id, payload={"key": self.key}))
-        await self.expect("REGISTER_OK")
+        packet = await self.expect("REGISTER_OK")
+        self.radio = (packet.payload or {}).get("radio", {})
 
     async def authenticate(self) -> None:
         await self.send(Packet("AUTH", self.ue_id, payload={"key": self.key}))
         await self.expect("AUTH_OK")
+
+    async def radio_info(self) -> dict:
+        await self.send(Packet("RADIO_INFO", self.ue_id))
+        packet = await self.expect("RADIO_INFO")
+        self.radio = packet.payload or {}
+        return self.radio
 
     async def message(self, recipient: str, text: str) -> None:
         await self.send(Packet("DATA", self.ue_id, recipient, {"text": text}))
