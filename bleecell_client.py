@@ -11,6 +11,7 @@ import numpy as np
 import sounddevice as sd
 
 from bleecell.device import Device
+from bleecell.rtl_tcp import RtlTcpClient
 
 
 class AudioLink:
@@ -138,6 +139,7 @@ class ClientApp:
         self.call_active = False
         self.call_target = None
         self.radio = {}
+        self.rtl = None
 
         self._build()
 
@@ -169,6 +171,45 @@ class ClientApp:
 
         self.connect_btn = ttk.Button(conn, text="connect", command=self.connect)
         self.connect_btn.pack(fill="x", pady=(5, 0))
+
+        cell = ttk.LabelFrame(main, text="cell / sdr")
+        cell.pack(fill="x", pady=(0, 8))
+
+        self.sdr_host = tk.StringVar(value="argon.simtx.net")
+        self.sdr_port = tk.StringVar(value="1240")
+        self.sdr_frequency = tk.StringVar(value="1500000000")
+        self.sdr_rate = tk.StringVar(value="250000")
+
+        for label, var in (
+            ("rtl-tcp host", self.sdr_host),
+            ("rtl-tcp port", self.sdr_port),
+            ("frequency hz", self.sdr_frequency),
+            ("sample rate", self.sdr_rate),
+        ):
+            row = ttk.Frame(cell)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=label, width=14).pack(side="left")
+            ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
+
+        sdr_buttons = ttk.Frame(cell)
+        sdr_buttons.pack(fill="x", pady=(4, 0))
+        self.sdr_connect_btn = ttk.Button(
+            sdr_buttons, text="connect rtl-tcp", command=self.connect_sdr
+        )
+        self.sdr_connect_btn.pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(
+            sdr_buttons, text="disconnect", command=self.disconnect_sdr
+        ).pack(side="left", expand=True, fill="x", padx=(2, 0))
+
+        self.sdr_status = ttk.Label(
+            cell,
+            text="sdr: disconnected | capture 250 kS/s | waveform bandwidth 15 kHz",
+        )
+        self.sdr_status.pack(anchor="w", pady=(4, 0))
+        ttk.Label(
+            cell,
+            text="rtl-tcp provides raw IQ; AM/15 kHz is the SimTx RF setup, not the IQ protocol.",
+        ).pack(anchor="w")
 
         audio = ttk.LabelFrame(main, text="required audio")
         audio.pack(fill="x", pady=(0, 8))
@@ -333,6 +374,69 @@ class ClientApp:
             else:
                 await asyncio.sleep(0.01)
             await asyncio.sleep(0.005)
+
+    def connect_sdr(self):
+        if self.rtl is not None:
+            self.log("RTL-TCP is already connected")
+            return
+
+        try:
+            port = int(self.sdr_port.get())
+            frequency = int(self.sdr_frequency.get())
+            sample_rate = int(self.sdr_rate.get())
+        except ValueError:
+            self.sdr_status.config(text="sdr: invalid RTL-TCP settings")
+            return
+
+        self.rtl = RtlTcpClient(
+            self.sdr_host.get().strip(),
+            port,
+            sample_rate,
+            frequency,
+        )
+        self._run(self._connect_sdr_async())
+
+    async def _connect_sdr_async(self):
+        try:
+            await self.rtl.connect()
+            self.log(
+                f"RTL-TCP connected to {self.rtl.host}:{self.rtl.port} "
+                f"at {self.rtl.frequency_hz} Hz / {self.rtl.sample_rate} S/s"
+            )
+            self.root.after(
+                0,
+                lambda: self.sdr_connect_btn.config(text="rtl-tcp connected"),
+            )
+            asyncio.create_task(self._sdr_status_loop())
+        except Exception as exc:
+            self.log(f"RTL-TCP connection failed: {exc}")
+            self.rtl = None
+            self.root.after(
+                0, lambda: self.sdr_status.config(text=f"sdr: connection failed: {exc}")
+            )
+
+    async def _sdr_status_loop(self):
+        while self.rtl is not None and self.rtl.running:
+            level = self.rtl.signal_dbfs
+            level_text = "-inf dBFS" if level == float("-inf") else f"{level:.1f} dBFS"
+            text = (
+                f"sdr: connected | {self.rtl.frequency_hz / 1e6:.6f} MHz | "
+                f"{self.rtl.sample_rate / 1000:.0f} kS/s | IQ level {level_text} | "
+                f"15 kHz waveform"
+            )
+            self.root.after(0, lambda text=text: self.sdr_status.config(text=text))
+            await asyncio.sleep(0.25)
+
+        if self.rtl is not None:
+            self.root.after(0, lambda: self.sdr_status.config(text="sdr: disconnected"))
+
+    def disconnect_sdr(self):
+        if self.rtl is None:
+            return
+        rtl = self.rtl
+        self.rtl = None
+        self._run(rtl.close())
+        self.sdr_status.config(text="sdr: disconnected")
 
     def _show_radio(self):
         mhz = self.radio.get("bandwidth_mhz", 0)
