@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 
 from .packets import Packet
 
@@ -32,6 +33,27 @@ class Device:
 
     async def message(self, recipient: str, text: str) -> None:
         await self.send(Packet("DATA", self.ue_id, recipient, {"text": text}))
+
+    async def call(self, recipient: str) -> None:
+        await self.send(Packet("CALL", self.ue_id, recipient))
+
+    async def end_call(self, recipient: str) -> None:
+        await self.send(Packet("CALL_END", self.ue_id, recipient))
+
+    async def send_audio(self, recipient: str, pcm: bytes, sample_rate: int = 48000) -> None:
+        await self.send(
+            Packet(
+                "AUDIO",
+                self.ue_id,
+                recipient,
+                {
+                    "encoding": "pcm_s16le",
+                    "sample_rate": sample_rate,
+                    "channels": 1,
+                    "data": base64.b64encode(pcm).decode("ascii"),
+                },
+            )
+        )
 
     async def receive(self) -> Packet:
         assert self.reader is not None
