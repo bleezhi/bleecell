@@ -42,7 +42,26 @@ class CoreNetwork:
                         sub.authenticated = ok
                     await self.send(writer, Packet("AUTH_OK" if ok else "AUTH_FAIL", "CORE", packet.sender))
 
-                elif packet.kind == "DATA":
+                elif packet.kind in {"CALL", "CALL_END"}:
+                    sub = self.subscribers.get(packet.sender)
+                    if not sub or not sub.authenticated:
+                        await self.send(writer, Packet("ERROR", "CORE", packet.sender, {"reason": "not authenticated"}))
+                        continue
+
+                    target_id = packet.recipient or ""
+                    target = self.devices.get(target_id)
+                    if target is None:
+                        await self.send(writer, Packet("ERROR", "CORE", packet.sender, {"reason": "device unavailable"}))
+                        continue
+
+                    await self.send(target, packet)
+
+                    if packet.kind == "CALL":
+                        await self.send(writer, Packet("CALL_SENT", "CORE", packet.sender, {"target": target_id}))
+                    else:
+                        await self.send(writer, Packet("CALL_END_OK", "CORE", packet.sender, {"target": target_id}))
+
+                elif packet.kind in {"DATA", "AUDIO"}:
                     sub = self.subscribers.get(packet.sender)
                     if not sub or not sub.authenticated:
                         await self.send(writer, Packet("ERROR", "CORE", packet.sender, {"reason": "not authenticated"}))
@@ -54,6 +73,9 @@ class CoreNetwork:
                         continue
 
                     await self.send(target, packet)
+
+                    if packet.kind == "DATA":
+                        await self.send(writer, Packet("DATA_SENT", "CORE", packet.sender, {"target": packet.recipient}))
         finally:
             for ue_id, connection in list(self.devices.items()):
                 if connection is writer:
