@@ -6,7 +6,13 @@ from .packets import Packet
 
 
 class BaseStation:
-    def __init__(self, host: str = "127.0.0.1", port: int = 9100, core_port: int = 9000, cell_id: str = "0001"):
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 9100,
+        core_port: int = 9000,
+        cell_id: str = "0001",
+    ):
         self.host = host
         self.port = port
         self.core_port = core_port
@@ -14,22 +20,26 @@ class BaseStation:
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         core_reader, core_writer = await asyncio.open_connection(self.host, self.core_port)
-        try:
-            while data := await reader.readline():
-                packet = Packet.decode(data)
-                await self.send(core_writer, packet)
 
-                response = await core_reader.readline()
-                if response:
-                    writer.write(response)
-                    await writer.drain()
+        async def client_to_core() -> None:
+            while data := await reader.readline():
+                await self.send(core_writer, Packet.decode(data))
+
+        async def core_to_client() -> None:
+            while data := await core_reader.readline():
+                writer.write(data)
+                await writer.drain()
+
+        try:
+            await asyncio.gather(client_to_core(), core_to_client())
         finally:
             core_writer.close()
             await core_writer.wait_closed()
             writer.close()
             await writer.wait_closed()
 
-    async def send(self, writer: asyncio.StreamWriter, packet: Packet) -> None:
+    @staticmethod
+    async def send(writer: asyncio.StreamWriter, packet: Packet) -> None:
         writer.write(packet.encode())
         await writer.drain()
 
