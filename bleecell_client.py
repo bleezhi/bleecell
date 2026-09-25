@@ -137,6 +137,7 @@ class ClientApp:
         self.connected = False
         self.call_active = False
         self.call_target = None
+        self.radio = {}
 
         self._build()
 
@@ -181,6 +182,8 @@ class ClientApp:
             audio, text="a microphone is required before connecting"
         )
         self.audio_status.pack(anchor="w", pady=(4, 0))
+        self.radio_status = ttk.Label(audio, text="radio: unknown")
+        self.radio_status.pack(anchor="w")
 
         call = ttk.LabelFrame(main, text="call")
         call.pack(fill="x", pady=(0, 8))
@@ -266,7 +269,9 @@ class ClientApp:
             await self.device.connect()
             await self.device.register()
             await self.device.authenticate()
+            self.radio = await self.device.radio_info()
             self.connected = True
+            self._show_radio()
             self.log(f"connected and authenticated as {self.device.ue_id}")
             self.root.after(
                 0, lambda: self.connect_btn.config(text="connected", state="disabled")
@@ -329,6 +334,14 @@ class ClientApp:
                 await asyncio.sleep(0.01)
             await asyncio.sleep(0.005)
 
+    def _show_radio(self):
+        mhz = self.radio.get("bandwidth_mhz", 0)
+        mbps = self.radio.get("theoretical_mbps", 0)
+        rbs = self.radio.get("resource_blocks", 0)
+        self.root.after(0, lambda: self.radio_status.config(
+            text=f"wideband cell: {mhz:.0f} MHz | {mbps:.0f} Mbps model | {rbs} RBs"
+        ))
+
     def start_call(self):
         if not self.connected or not self.device:
             self.log("connect first")
@@ -352,6 +365,15 @@ class ClientApp:
         self._run(self.device.end_call(target))
         self.call_status.config(text="idle")
         self.log(f"ended call with {target}")
+        if self.connected and self.device:
+            self._run(self._refresh_radio())
+
+    async def _refresh_radio(self):
+        try:
+            self.radio = await self.device.radio_info()
+            self._show_radio()
+        except Exception as exc:
+            self.log(f"radio info failed: {exc}")
 
     def send_message(self):
         if not self.connected or not self.device:
